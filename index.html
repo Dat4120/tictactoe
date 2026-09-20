@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta charset="utf-8">
+	<title>New webpage</title>
+</head>
+
+<body>
+	<button id='reset'>Reset</button>
+	<canvas id='canv'></canvas>
+	<style>
+	body {
+		padding: 0px;
+		overflow: hidden;
+	}
+
+	#reset {
+		position: fixed;
+		right: 8px;
+	}
+	</style>
+	<script>
+	var ctx = document.getElementById('canv').getContext('2d')
+
+	function main() {
+		const width = innerWidth,
+			height = innerHeight
+		canv.width = width
+		canv.height = height
+		let matrixStack = [],
+			translate = (x, y = x) => ctx.translate(x, y),
+			noStroke = () => ctx.strokeStyle = 'rgba(0,0,0,0)',
+			strokeWeight = (n) => ctx.lineWidth = n,
+			stroke = (r, g = r, b = r, a = 255) => ctx.strokeStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + (a / 255) + ')',
+			fill = (r, g = r, b = r, a = 255) => ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + (a / 255) + ')',
+			noFill = () => ctx.fillStyle = 'rgba(0,0,0,0)',
+			strokeJoin = (m) => ctx.lineJoin = m,
+			strokeCap = (m) => ctx.lineCap = m,
+			text = (n, x, y) => ctx.fillText(n, x, y),
+			createFont = (x) => x,
+			textFont = (x, n) => ctx.font = n + 'px ' + x,
+			line = (a, b, c, d) => {
+				ctx.beginPath()
+				ctx.moveTo(a, b)
+				ctx.lineTo(c, d)
+				ctx.stroke()
+			},
+			ellipse = (x, y, w, h) => {
+				ctx.beginPath()
+				ctx.ellipse(x, y, w * 0.5, h * 0.5, 0, 0, 7)
+				ctx.closePath()
+				ctx.fill()
+				ctx.stroke()
+			},
+			pushMatrix = () => matrixStack.push(ctx.getTransform()),
+			popMatrix = () => {
+				let mat = matrixStack.pop()
+				ctx.setTransform(mat.a, mat.b, mat.c, mat.d, mat.e, mat.f)
+			}
+		strokeJoin('round');
+		strokeCap('round')
+		var playWithTheBot = false;
+		var playAs = 'x';
+		playAs = (playAs.toLowerCase() === 'x') - 0
+		//turn is a boolean, x's turn is 1, o is 0
+		let turn = 1
+		//filled and iden are 3x3, 9uint bitboards. filled's bits are on if the corresponding cell is played. iden determines if a cell has x or o
+		let filled = 0,
+			iden = 0
+		let shutoff = 0
+		let notes = function() {}
+		let TTT = function() {
+			notes = function() {}
+			//the winning lines defined with bits, to be masked for fast win checking
+			let win1 = 7,
+				win2 = 56,
+				win3 = 448,
+				win4 = 73,
+				win5 = 146,
+				win6 = 292,
+				win7 = 273,
+				win8 = 84
+			//a transposition table that stores only the best moves
+			let TT = new Map()
+			//a basic negamax recursion search
+			let search = function(depth, alpha, beta, the_filled, the_iden, the_turn) {
+				//determine wins by masking with the possible winning connections
+				let omask = (~the_iden) & the_filled,
+					xmask = the_iden
+				let winable = !the_turn ? omask : xmask
+				if(
+					(winable & win1) === win1 || (winable & win2) === win2 || (winable & win3) === win3 || (winable & win4) === win4 || (winable & win5) === win5 || (winable & win6) === win6 || (winable & win7) === win7 || (winable & win8) === win8)
+					//favor lines with faster wins over lines with known wins using depth advantage. a mate score.
+					//theres no evaluation function because it's a solved game, it's either whos winning in how many moves or a dead draw
+					return 9 - depth
+				winable = the_turn ? omask : xmask
+				if(
+					(winable & win1) === win1 || (winable & win2) === win2 || (winable & win3) === win3 || (winable & win4) === win4 || (winable & win5) === win5 || (winable & win6) === win6 || (winable & win7) === win7 || (winable & win8) === win8) return depth - 9
+				//511 is 0b111111111, a filled board. return as draw
+				if(the_filled === 511) return 0
+				//simply mash the 2 bitboards into a 18uint. no hashing or zobrist
+				let posKey = (the_filled << 9) | the_iden,
+					TTentry = TT.get(posKey)
+				//if there is a transposition for the position, use the best move and search only with first. a hash move
+				//rudimentary move ordering heuristic, hardcoded to bitboard marker representation. center is often better than corners, which are better than sides
+				//[4,0,2,6,8,1,3,5,7].map(x=>1<<x)
+				let moves = [TTentry, 16, 1, 4, 64, 256, 2, 8, 32, 128],
+					bestMove = null
+				for(let i = 0; i < 10; i++) {
+					let move = moves[i]
+					//if move is illegal, skip
+					if(the_filled & move || i && move === moves[0] || move === undefined) continue
+					//search duh
+					let score = -search(depth + 1, -beta, -alpha, the_filled | move, the_iden | (move * the_turn), the_turn ^ 1)
+					//normal stuff
+					if(score > alpha) {
+						if(score >= beta) return beta
+						alpha = score
+						bestMove = move
+					}
+				}
+				//set the transposition table
+				if(bestMove !== null) TT.set(posKey, bestMove)
+				return alpha
+			}
+			//run the search and measure the time
+			let t = performance.now()
+			let E = search(0, -Infinity, Infinity, filled, iden, turn)
+			t = performance.now() - t
+			E *= turn ? 1 : -1
+			//simply get the best move from the table at the present board state
+			let move = TT.get((filled << 9) | iden)
+			if(playWithTheBot) {
+				filled = filled | move
+				if(turn) iden = iden | move
+				//bitboard marker representation back to cell index
+				move = Math.clz32(move) ^ 31
+				turn ^= 1
+				notes = function() {
+					pushMatrix()
+					translate(-width * 0.5, -height * 0.5)
+					fill(0)
+					text('Thinking time: ' + Number(t.toFixed(6)) + 'ms', 8, 15)
+					popMatrix()
+				}
+			} else {
+				move = Math.clz32(move) ^ 31
+				notes = function() {
+					pushMatrix()
+					translate(-width * 0.5, -height * 0.5)
+					fill(0)
+					text('Thinking time: ' + Number(t.toFixed(6)) + 'ms', 8, 15)
+					text('Best move: ' + move, 8, 30)
+					text('Eval: ' + E, 8, 45)
+					if(!E) E = 'Drawn'
+					else E = (E > 0 ? 'X' : 'O') + ' mates in ' + (9 - Math.abs(E))
+					text(E, 8, 75)
+					popMatrix()
+					if(move === undefined) return
+					let x = (move % 3) * s - s,
+						y = Math.floor(move / 3) * s - s
+					stroke(0, 0, 0, 25)
+					noFill()
+					if(turn) {
+						line(x - S * 0.25, y - S * 0.25, x + S * 0.25, y + S * 0.25)
+						line(x + S * 0.25, y - S * 0.25, x - S * 0.25, y + S * 0.25)
+					} else ellipse(x, y, S * 0.75, S * 0.75)
+				}
+			}
+			//check if theres a win or draw and report so
+			let won1 = (~iden) & filled,
+				won2 = iden,
+				_won1, _won2
+			if(
+				(_won1 = ((won1 & win1) === win1 || (won1 & win2) === win2 || (won1 & win3) === win3 || (won1 & win4) === win4 || (won1 & win5) === win5 || (won1 & win6) === win6 || (won1 & win7) === win7 || (won1 & win8) === win8)) || (_won2 = ((won2 & win1) === win1 || (won2 & win2) === win2 || (won2 & win3) === win3 || (won2 & win4) === win4 || (won2 & win5) === win5 || (won2 & win6) === win6 || (won2 & win7) === win7 || (won2 & win8) === win8)) || filled === 511) {
+				fill(0, 0, 0, 100)
+				noStroke()
+				shutoff = true
+				notes = function() {
+					if(_won1) text('O wins', -width * 0.5 + 10, height * 0.5 - 5)
+					else if(_won2) text('X wins', -width * 0.5 + 10, height * 0.5 - 5)
+					else if(filled === 511) {
+						text('Draw', -width * 0.5 + 10, height * 0.5 - 5)
+					}
+				}
+			}
+		}
+		translate(width * 0.5, height * 0.5);
+		let S = Math.min(width, height) * 0.125,
+			s = S * 2
+
+		function render(board) {
+			ctx.clearRect(-width * 0.5, -height * 0.5, width, height)
+			textFont(createFont('monospace'), 16)
+			fill(0)
+			if(!shutoff) text((turn ? 'X' : 'O') + "'s Turn", -width * 0.5 + 10, height * 0.5 - 20)
+			noFill()
+			stroke(0)
+			strokeWeight(S * 0.1)
+			line(-S, -S * 3, -S, S * 3)
+			line(S, -S * 3, S, S * 3)
+			line(-S * 3, -S, S * 3, -S)
+			line(-S * 3, S, S * 3, S)
+			for(let i = 0; i < 9; i++) {
+				if((filled >> i) & 1) {
+					let x = (i % 3) * s - s,
+						y = Math.floor(i / 3) * s - s
+					if((iden >> i) & 1) {
+						line(x - S * 0.5, y - S * 0.5, x + S * 0.5, y + S * 0.5)
+						line(x + S * 0.5, y - S * 0.5, x - S * 0.5, y + S * 0.5)
+					} else {
+						ellipse(x, y, S, S)
+					}
+				}
+			}
+			notes()
+		}
+		if(!playWithTheBot || !playAs) TTT()
+		render()
+		canv.onclick = function(e) {
+			let mouseX = e.clientX
+			let mouseY = e.clientY
+			if(shutoff) return
+			//get cell of mouse and make move
+			let x = mouseX - width * 0.5
+			let y = mouseY - height * 0.5
+			let ix = Math.round(x / s)
+			let iy = Math.round(y / s)
+			x = ix * s
+			y = iy * s
+			if(ix < -1 || ix > 1 || iy < -1 || iy > 1) return
+			let i = ix + iy * 3 + 4
+			if((filled >> i) & 1) return
+			filled = filled | (1 << i)
+			if(turn) iden = iden | (1 << i)
+			turn ^= 1
+			TTT()
+			render()
+		}
+	}
+	window.addEventListener('load', main)
+	reset.onclick = main
+	</script>
+</body>
+
+</html>
